@@ -27,6 +27,10 @@
 
 #include <types/hdr_idx.h>
 
+#ifdef SFLOW
+#include <sflow/sflow_haproxy.h>
+#endif
+
 /* These are the flags that are found in txn->flags */
 
 /* action flags */
@@ -380,6 +384,9 @@ struct http_txn {
 	int cookie_last_date;           /* if non-zero, last date the expirable cookie was set/seen */
 
 	struct http_auth_data auth;	/* HTTP auth data */
+#ifdef SFLOW
+	struct sflow_capture *sflow_c;  /* present if we are sampling this txn */
+#endif
 };
 
 /* This structure is used by http_find_header() to return values of headers.

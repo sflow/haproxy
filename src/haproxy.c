@@ -106,6 +106,10 @@
 #include <proto/ssl_sock.h>
 #endif
 
+#ifdef SFLOW
+#include <sflow/sflow_haproxy.h>
+#endif
+
 /*********************************************************************/
 
 extern const struct comp_algo comp_algos[];
@@ -1558,6 +1562,11 @@ int main(int argc, char **argv)
 	}
 
 	protocol_enable_all();
+
+#ifdef SFLOW
+	sflow_init();
+#endif
+
 	/*
 	 * That's it : the central polling loop. Run until we stop.
 	 */

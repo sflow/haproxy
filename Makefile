@@ -648,6 +648,11 @@ endif
 
 WRAPPER_OBJS = src/haproxy-systemd-wrapper.o
 
+ifneq ($(USE_SFLOW),)
+COPTS += -DSFLOW
+OBJS += src/sflow_api.o src/sflow_config.o src/sflow.o
+endif
+
 # Not used right now
 LIB_EBTREE = $(EBTREE_DIR)/libebtree.a
 

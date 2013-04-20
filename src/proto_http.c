@@ -64,6 +64,10 @@
 #include <proto/stream_interface.h>
 #include <proto/task.h>
 
+#ifdef SFLOW
+#include <sflow/sflow_haproxy.h>
+#endif
+
 const char HTTP_100[] =
 	"HTTP/1.1 100 Continue\r\n\r\n";
 
@@ -2601,7 +2605,61 @@ int http_wait_for_request(struct session *s, struct channel *req, int an_bit)
 	if (unlikely((s->logs.logwait & LW_REQHDR) && txn->req.cap))
 		capture_headers(req->buf->p, &txn->hdr_idx,
 				txn->req.cap, s->fe->req_cap);
+#ifdef SFLOW
+	sflow_start_transaction(s);
+	if(unlikely(txn->sflow_c)) {
+		/* we are sampling this transaction - capture fields */
+		struct hdr_ctx ctx;
+		int len;
 
+		if(msg->sl.rq.v_l == 8) {
+			/* assume form is "HTTP/x.y" */
+			int major = req->buf->p[msg->sl.rq.v + 5] - '0';
+			int minor = req->buf->p[msg->sl.rq.v + 7] - '0';
+			txn->sflow_c->version = (major * 1000) + minor;
+		}
+
+		len = msg->sl.rq.l;
+		if (len >= SFLHTTP_MAX_URI_LEN)
+			len = SFLHTTP_MAX_URI_LEN;
+		memcpy(txn->sflow_c->uri, req->buf->p, len);
+		txn->sflow_c->uri[len] = 0;
+		txn->sflow_c->uri_len = len;
+
+		memset(&ctx, 0, sizeof(ctx));
+		if(http_find_header2("Host", strlen("Host"), req->buf->p, &txn->hdr_idx, &ctx)) {
+			len = (ctx.vlen > SFLHTTP_MAX_HOST_LEN) ? SFLHTTP_MAX_HOST_LEN : ctx.vlen;
+			memcpy(txn->sflow_c->host, ctx.line + ctx.val, len);
+			txn->sflow_c->host_len = len;
+		}
+		memset(&ctx, 0, sizeof(ctx));
+		if(http_find_header2("Referer", strlen("Referer"), req->buf->p, &txn->hdr_idx, &ctx)) {
+			len = (ctx.vlen > SFLHTTP_MAX_REFERER_LEN) ? SFLHTTP_MAX_REFERER_LEN : ctx.vlen;
+			memcpy(txn->sflow_c->referer, ctx.line + ctx.val, len);
+			txn->sflow_c->referer_len = len;
+		}
+		memset(&ctx, 0, sizeof(ctx));
+		if(http_find_header2("User-Agent", strlen("User-Agent"), req->buf->p, &txn->hdr_idx, &ctx)) {
+			len = (ctx.vlen > SFLHTTP_MAX_USERAGENT_LEN) ? SFLHTTP_MAX_USERAGENT_LEN : ctx.vlen;
+			memcpy(txn->sflow_c->useragent, ctx.line + ctx.val, len);
+			txn->sflow_c->useragent_len = len;
+		}
+		memset(&ctx, 0, sizeof(ctx));
+		if(http_find_header2("X-Forwarded-For", strlen("X-Forwarded-For"), req->buf->p, &txn->hdr_idx, &ctx)) {
+			len = (ctx.vlen > SFLHTTP_MAX_XFF_LEN) ? SFLHTTP_MAX_XFF_LEN : ctx.vlen;
+			memcpy(txn->sflow_c->xff, ctx.line + ctx.val, len);
+			txn->sflow_c->xff_len = len;
+		}
+		/* TODO: what header would have the RFC 1413 user-id info? */
+		memset(&ctx, 0, sizeof(ctx));
+		if(http_find_header2("Auth-User", strlen("Auth-User"), req->buf->p, &txn->hdr_idx, &ctx)) {
+			len = (ctx.vlen > SFLHTTP_MAX_USERAGENT_LEN) ? SFLHTTP_MAX_USERAGENT_LEN : ctx.vlen;
+			memcpy(txn->sflow_c->authuser, ctx.line + ctx.val, len);
+			txn->sflow_c->authuser_len = len;
+		}
+	}
+#endif
+	      
 	/* 6: determine the transfer-length.
 	 * According to RFC2616 #4.4, amended by the HTTPbis working group,
 	 * the presence of a message-body in a REQUEST and its transfer length
@@ -5301,6 +5359,19 @@ int http_wait_for_response(struct session *s, struct channel *rep, int an_bit)
 	if (unlikely((s->logs.logwait & LW_RSPHDR) && txn->rsp.cap))
 		capture_headers(rep->buf->p, &txn->hdr_idx,
 				txn->rsp.cap, s->fe->rsp_cap);
+#ifdef SFLOW
+	if(unlikely(txn->sflow_c)) {
+		/* we are sampling this transaction - capture fields */
+		struct hdr_ctx ctx;
+		int len;
+		memset(&ctx, 0, sizeof(ctx));
+		if(http_find_header2("Content-Type", strlen("Content-Type"), rep->buf->p, &txn->hdr_idx, &ctx)) {
+			len = (ctx.vlen > SFLHTTP_MAX_MIMETYPE_LEN) ? SFLHTTP_MAX_MIMETYPE_LEN : ctx.vlen;
+			memcpy(txn->sflow_c->mimetype, ctx.line + ctx.val, len);
+			txn->sflow_c->mimetype_len = len;
+		}
+	}
+#endif
 
 	/* 4: determine the transfer-length.
 	 * According to RFC2616 #4.4, amended by the HTTPbis working group,
@@ -8065,6 +8136,10 @@ void http_init_txn(struct session *s)
 void http_end_txn(struct session *s)
 {
 	struct http_txn *txn = &s->txn;
+
+#ifdef SFLOW
+	sflow_end_transaction(s);
+#endif
 
 	/* these ones will have been dynamically allocated */
 	pool_free2(pool2_requri, txn->uri);
